@@ -5,14 +5,34 @@ body {
     font-family: sans-serif;
 }
 
-video {
+.camera-area {
+    position: relative;
     width: 90%;
     max-width: 700px;
-    margin-top: 20px;
+    margin: 20px auto;
+}
+
+video {
+    width: 100%;
+    display: block;
+}
+
+canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+
+    width: 100%;
+    height: 100%;
 }
 
 button {
     font-size: 20px;
     padding: 15px 30px;
     margin-top: 20px;
+}
+
+#result {
+    font-size: 30px;
+    font-weight: bold;
 }
