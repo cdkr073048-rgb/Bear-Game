@@ -35,8 +35,9 @@ async function setupPose() {
 
 
     const vision =
-        await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+    　　await FilesetResolver.forVisionTasks(
+    　　    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+    　　　);
         );
 
 
