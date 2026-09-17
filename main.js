@@ -1,34 +1,50 @@
-// MediaPipeを読み込む
-const {
+// ========================================
+// MediaPipe Pose Landmarker
+// ========================================
+
+import {
     PoseLandmarker,
     FilesetResolver
-} = await import(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs"
-);
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
 
 
+// ========================================
 // HTMLの部品
+// ========================================
+
 const video =
     document.getElementById("video");
 
+const canvas =
+    document.getElementById("canvas");
+
+const ctx =
+    canvas.getContext("2d");
+
 const status =
     document.getElementById("status");
+
+const scoreDisplay =
+    document.getElementById("score");
 
 const startButton =
     document.getElementById("startButton");
 
 
-// Pose Landmarker
+// ========================================
+// MediaPipe
+// ========================================
+
 let poseLandmarker = null;
 
 
-// 前回処理した動画時間
+// 最後に処理した動画時間
 let lastVideoTime = -1;
 
 
-// ==========================
+// ========================================
 // MediaPipeを準備
-// ==========================
+// ========================================
 
 async function setupPose() {
 
@@ -36,10 +52,10 @@ async function setupPose() {
         "AIを準備しています...";
 
 
-    // MediaPipeの実行環境
+    // MediaPipeのWASM実行環境
     const vision =
         await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
         );
 
 
@@ -48,15 +64,25 @@ async function setupPose() {
         await PoseLandmarker.createFromOptions(
             vision,
             {
+
                 baseOptions: {
 
                     modelAssetPath:
-                        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+                        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+
+                    // スマホでもまずはCPUで動かす
+                    delegate: "CPU"
                 },
 
                 runningMode: "VIDEO",
 
-                numPoses: 1
+                numPoses: 1,
+
+                minPoseDetectionConfidence: 0.5,
+
+                minPosePresenceConfidence: 0.5,
+
+                minTrackingConfidence: 0.5
             }
         );
 
@@ -66,69 +92,112 @@ async function setupPose() {
 }
 
 
-// ==========================
+// ========================================
 // カメラ開始
-// ==========================
+// ========================================
 
 async function startCamera() {
 
-    try {
+    if (!window.isSecureContext) {
 
-        const stream =
-            await navigator.mediaDevices.getUserMedia({
+        throw new Error(
+            "HTTPSまたはlocalhostで実行してください"
+        );
+    }
 
-                video: {
-                    facingMode: "user",
-                    width: 640,
-                    height: 480
+
+    if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+    ) {
+
+        throw new Error(
+            "このブラウザではカメラを使用できません"
+        );
+    }
+
+
+    const stream =
+        await navigator.mediaDevices.getUserMedia({
+
+            video: {
+
+                facingMode: "user",
+
+                width: {
+                    ideal: 640
                 },
 
-                audio: false
-            });
+                height: {
+                    ideal: 480
+                }
+            },
+
+            audio: false
+        });
 
 
-        video.srcObject = stream;
-
-        await video.play();
+    video.srcObject = stream;
 
 
-        status.textContent =
-            "人を探しています...";
+    // カメラの読み込みが完了するまで待つ
+    await new Promise((resolve) => {
+
+        video.onloadeddata = resolve;
+
+    });
 
 
-        detectPose();
+    await video.play();
 
 
-    } catch (error) {
+    // Canvasのサイズをカメラと同じにする
+    canvas.width =
+        video.videoWidth;
 
-        console.error(error);
+    canvas.height =
+        video.videoHeight;
 
-        status.textContent =
-            "カメラを起動できませんでした。";
 
-    }
+    status.textContent =
+        "人を探しています...";
+
+
+    // 姿勢検出開始
+    detectPose();
 }
 
 
-// ==========================
+// ========================================
 // 姿勢検出
-// ==========================
+// ========================================
 
 function detectPose() {
 
     if (
-        poseLandmarker &&
-        video.readyState >= 2
+        !poseLandmarker ||
+        video.readyState < 2
     ) {
 
-        if (
-            video.currentTime !==
-            lastVideoTime
-        ) {
+        requestAnimationFrame(
+            detectPose
+        );
 
-            lastVideoTime =
-                video.currentTime;
+        return;
+    }
 
+
+    // 新しいフレームだけ処理
+    if (
+        video.currentTime !==
+        lastVideoTime
+    ) {
+
+        lastVideoTime =
+            video.currentTime;
+
+
+        try {
 
             const result =
                 poseLandmarker.detectForVideo(
@@ -137,6 +206,7 @@ function detectPose() {
                 );
 
 
+            // 人体が見つかった
             if (
                 result.landmarks &&
                 result.landmarks.length > 0
@@ -146,17 +216,33 @@ function detectPose() {
                     result.landmarks[0];
 
 
-                checkPosture(
-                    landmarks
-                );
+                drawPose(landmarks);
 
 
-            } else {
+                checkPosture(landmarks);
+
+            }
+
+            // 人体が見つからない
+            else {
+
+                clearCanvas();
 
                 status.textContent =
                     "人が見つかりません";
 
+                scoreDisplay.textContent =
+                    "姿勢スコア：--";
             }
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "姿勢検出エラー：",
+                error
+            );
         }
     }
 
@@ -167,13 +253,136 @@ function detectPose() {
 }
 
 
-// ==========================
-// 姿勢判定
-// ==========================
+// ========================================
+// 骨格をCanvasに描画
+// ========================================
 
-function checkPosture(
-    landmarks
-) {
+function drawPose(landmarks) {
+
+    clearCanvas();
+
+
+    // 骨格をつなぐ線
+    const connections = [
+
+        [11, 12], // 肩
+
+        [11, 13], // 左上腕
+        [13, 15], // 左前腕
+
+        [12, 14], // 右上腕
+        [14, 16], // 右前腕
+
+        [11, 23], // 左側
+        [12, 24], // 右側
+
+        [23, 24], // 腰
+
+        [23, 25], // 左太もも
+        [25, 27], // 左すね
+
+        [24, 26], // 右太もも
+        [26, 28]  // 右すね
+    ];
+
+
+    // 線を描く
+    ctx.lineWidth = 4;
+
+
+    connections.forEach(
+        ([a, b]) => {
+
+            const pointA =
+                landmarks[a];
+
+            const pointB =
+                landmarks[b];
+
+
+            if (
+                pointA.visibility < 0.5 ||
+                pointB.visibility < 0.5
+            ) {
+                return;
+            }
+
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                pointA.x * canvas.width,
+                pointA.y * canvas.height
+            );
+
+            ctx.lineTo(
+                pointB.x * canvas.width,
+                pointB.y * canvas.height
+            );
+
+            ctx.strokeStyle = "lime";
+
+            ctx.stroke();
+        }
+    );
+
+
+    // 関節を描く
+    landmarks.forEach(
+        (point) => {
+
+            if (
+                point.visibility < 0.5
+            ) {
+                return;
+            }
+
+
+            const x =
+                point.x * canvas.width;
+
+            const y =
+                point.y * canvas.height;
+
+
+            ctx.beginPath();
+
+            ctx.arc(
+                x,
+                y,
+                6,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.fillStyle = "red";
+
+            ctx.fill();
+        }
+    );
+}
+
+
+// ========================================
+// Canvasを消す
+// ========================================
+
+function clearCanvas() {
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+}
+
+
+// ========================================
+// 姿勢判定
+// ========================================
+
+function checkPosture(landmarks) {
 
     // 左肩
     const leftShoulder =
@@ -192,7 +401,31 @@ function checkPosture(
         landmarks[24];
 
 
+    // 4点の信頼度が低い場合
+    if (
+        leftShoulder.visibility < 0.5 ||
+        rightShoulder.visibility < 0.5 ||
+        leftHip.visibility < 0.5 ||
+        rightHip.visibility < 0.5
+    ) {
+
+        status.textContent =
+            "体全体をカメラに映してください";
+
+        scoreDisplay.textContent =
+            "姿勢スコア：--";
+
+        return;
+    }
+
+
     // 肩の中心
+    const shoulderX =
+        (
+            leftShoulder.x +
+            rightShoulder.x
+        ) / 2;
+
     const shoulderY =
         (
             leftShoulder.y +
@@ -201,6 +434,12 @@ function checkPosture(
 
 
     // 腰の中心
+    const hipX =
+        (
+            leftHip.x +
+            rightHip.x
+        ) / 2;
+
     const hipY =
         (
             leftHip.y +
@@ -208,18 +447,45 @@ function checkPosture(
         ) / 2;
 
 
-    // 肩と腰の距離
-    const difference =
+    // 肩→腰の差
+    const dx =
+        hipX - shoulderX;
+
+    const dy =
         hipY - shoulderY;
 
 
-    // 仮の姿勢判定
-    if (difference > 0.25) {
+    // 縦方向に対してどれくらい傾いているか
+    const angle =
+        Math.abs(
+            Math.atan2(dx, dy)
+            * 180 /
+            Math.PI
+        );
+
+
+    // 角度を100点満点にする
+    const score =
+        Math.max(
+            0,
+            100 - angle * 3
+        );
+
+
+    scoreDisplay.textContent =
+        "姿勢スコア：" +
+        Math.round(score);
+
+
+    // 仮の判定
+    if (angle < 15) {
 
         status.textContent =
             "🟢 GOOD！";
 
-    } else {
+    }
+
+    else {
 
         status.textContent =
             "🔴 姿勢を確認！";
@@ -227,16 +493,15 @@ function checkPosture(
 }
 
 
-// ==========================
-// ボタン
-// ==========================
+// ========================================
+// カメラ開始ボタン
+// ========================================
 
 startButton.addEventListener(
     "click",
     async () => {
 
-        startButton.disabled =
-            true;
+        startButton.disabled = true;
 
         try {
 
@@ -244,14 +509,21 @@ startButton.addEventListener(
 
             await startCamera();
 
-        } catch (error) {
+        }
+
+        catch (error) {
 
             console.error(error);
 
             status.textContent =
-                "MediaPipeの起動に失敗しました。";
+                "起動に失敗しました";
 
+            console.error(
+                "詳細：",
+                error.message
+            );
+
+            startButton.disabled = false;
         }
-
     }
 );
