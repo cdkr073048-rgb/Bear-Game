@@ -3,50 +3,54 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
 
-    <title>熊対策ゲーム</title>
+    <title>熊ゲーム 姿勢判定</title>
 
-    <link rel="stylesheet" href="style.css">
+    <!-- MediaPipe -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs"
+        crossorigin="anonymous">
+    </script>
+
+    <style>
+        body {
+            background: #222;
+            color: white;
+            text-align: center;
+            font-family: sans-serif;
+        }
+
+        video {
+            width: 90%;
+            max-width: 600px;
+            transform: scaleX(-1);
+        }
+
+        #status {
+            font-size: 30px;
+            font-weight: bold;
+        }
+    </style>
 </head>
 
 <body>
 
-    <h1>熊対策ゲーム</h1>
+    <h1>🐻 熊ゲーム 姿勢判定</h1>
 
-    <p id="message">
-        カメラを開始してください
-    </p>
+    <video id="video"
+           autoplay
+           playsinline>
+    </video>
 
-    <div class="camera-area">
-
-        <video
-            id="video"
-            autoplay
-            playsinline>
-        </video>
-
-        <canvas id="canvas"></canvas>
-
-    </div>
+    <p id="status">準備中...</p>
 
     <button id="startButton">
         カメラを開始
     </button>
 
-    <p id="result">
-        判定待ち
-    </p>
-
-    <p id="score">
-        姿勢スコア：--
-    </p>
-
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.js"></script>
-
     <script src="main.js"></script>
 
-
 </body>
-
 </html>
