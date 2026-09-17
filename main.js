@@ -1,54 +1,29 @@
-
-
-const video =
-    document.getElementById("video");
-
-const canvas =
-    document.getElementById("canvas");
-
-const ctx =
-    canvas.getContext("2d");
-
-const message =
-    document.getElementById("message");
-
-const startButton =
-    document.getElementById("startButton");
-
-const resultText =
-    document.getElementById("result");
-
-const scoreText =
-    document.getElementById("score");
-
+const video = document.getElementById("video");
+const status = document.getElementById("status");
+const startButton = document.getElementById("startButton");
 
 let poseLandmarker = null;
-
 let lastVideoTime = -1;
 
 
-// ========================================
+// =========================
 // MediaPipeを準備
-// ========================================
+// =========================
 
 async function setupPose() {
 
-    message.textContent =
-        "姿勢AIを読み込んでいます...";
-
+    status.textContent = "AIを準備しています...";
 
     const vision =
         await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
         );
-
 
     poseLandmarker =
         await PoseLandmarker.createFromOptions(
             vision,
             {
                 baseOptions: {
-
                     modelAssetPath:
                         "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
                 },
@@ -59,75 +34,73 @@ async function setupPose() {
             }
         );
 
-
-    message.textContent =
-        "姿勢AIの準備完了！";
+    status.textContent =
+        "AIの準備完了！カメラを開始してください。";
 }
 
 
-// ========================================
-// カメラ
-// ========================================
+// =========================
+// カメラ開始
+// =========================
 
 async function startCamera() {
 
-    message.textContent =
-        "カメラを起動しています...";
+    try {
 
+        const stream =
+            await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: "user"
+                },
+                audio: false
+            });
 
-    const stream =
-        await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false
-        });
+        video.srcObject = stream;
 
+        video.addEventListener(
+            "loadeddata",
+            () => {
 
-    video.srcObject = stream;
+                status.textContent =
+                    "人を探しています...";
 
-    await video.play();
+                detectPose();
 
+            },
+            { once: true }
+        );
 
-    canvas.width =
-        video.videoWidth;
+    } catch (error) {
 
-    canvas.height =
-        video.videoHeight;
+        console.error(error);
 
+        status.textContent =
+            "カメラを使用できませんでした。";
 
-    message.textContent =
-        "姿勢を検出しています...";
-
-
-    detectPose();
+    }
 }
 
 
-// ========================================
+// =========================
 // 姿勢検出
-// ========================================
+// =========================
 
-function detectPose() {
+async function detectPose() {
 
     if (
-        poseLandmarker &&
-        video.readyState >= 2 &&
         video.currentTime !== lastVideoTime
+        &&
+        poseLandmarker
     ) {
+
+        lastVideoTime =
+            video.currentTime;
 
         const result =
             poseLandmarker.detectForVideo(
                 video,
                 performance.now()
             );
-
-
-        ctx.clearRect(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-        );
-
 
         if (
             result.landmarks &&
@@ -137,95 +110,86 @@ function detectPose() {
             const landmarks =
                 result.landmarks[0];
 
-
-            const drawingUtils =
-                new DrawingUtils(ctx);
-
-
-            // 骨格を描画
-            drawingUtils.drawConnectors(
-                landmarks,
-                PoseLandmarker.POSE_CONNECTIONS
-            );
-
-
-            drawingUtils.drawLandmarks(
-                landmarks
-            );
-
-
-            resultText.textContent =
-                "人を検出しました";
-
-            scoreText.textContent =
-                "姿勢スコア：100";
-
+            checkPosture(landmarks);
 
         } else {
 
-            resultText.textContent =
-                "人を検出できません";
-
-            scoreText.textContent =
-                "姿勢スコア：--";
+            status.textContent =
+                "人が見つかりません";
         }
-
-
-        lastVideoTime =
-            video.currentTime;
     }
 
-
-    requestAnimationFrame(
-        detectPose
-    );
+    requestAnimationFrame(detectPose);
 }
 
 
-// ========================================
-// スタートボタン
-// ========================================
+// =========================
+// 姿勢判定
+// =========================
+
+function checkPosture(landmarks) {
+
+    // 左肩
+    const leftShoulder =
+        landmarks[11];
+
+    // 右肩
+    const rightShoulder =
+        landmarks[12];
+
+    // 左腰
+    const leftHip =
+        landmarks[23];
+
+    // 右腰
+    const rightHip =
+        landmarks[24];
+
+
+    // 肩の中心
+    const shoulderY =
+        (leftShoulder.y +
+         rightShoulder.y) / 2;
+
+
+    // 腰の中心
+    const hipY =
+        (leftHip.y +
+         rightHip.y) / 2;
+
+
+    // 肩と腰の距離
+    const difference =
+        hipY - shoulderY;
+
+
+    // 仮の判定
+    if (difference > 0.25) {
+
+        status.textContent =
+            "🟢 GOOD！";
+
+    } else {
+
+        status.textContent =
+            "🔴 姿勢を確認！";
+    }
+}
+
+
+// =========================
+// ボタン
+// =========================
 
 startButton.addEventListener(
     "click",
     async () => {
 
-        console.log(
-            "スタートボタンが押されました"
-        );
-
         startButton.disabled = true;
 
+        await setupPose();
 
-        try {
-
-            await setupPose();
-
-            await startCamera();
-
-
-        } catch (error) {
-
-            console.error(
-                "MediaPipeエラー:",
-                error
-            );
-
-
-            message.textContent =
-                "エラーが発生しました";
-
-
-            resultText.textContent =
-                error.name;
-
-
-            scoreText.textContent =
-                error.message;
-
-
-            startButton.disabled = false;
-        }
+        await startCamera();
 
     }
 );
