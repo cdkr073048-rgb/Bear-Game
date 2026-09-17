@@ -8,18 +8,6 @@
     <title>熊対策ゲーム</title>
 
     <link rel="stylesheet" href="style.css">
-
-    <script type="module">
-        import {
-            PoseLandmarker,
-            FilesetResolver,
-            DrawingUtils
-        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
-
-        window.PoseLandmarker = PoseLandmarker;
-        window.FilesetResolver = FilesetResolver;
-        window.DrawingUtils = DrawingUtils;
-    </script>
 </head>
 
 <body>
@@ -32,9 +20,10 @@
 
     <div class="camera-area">
 
-        <video id="video"
-               autoplay
-               playsinline>
+        <video
+            id="video"
+            autoplay
+            playsinline>
         </video>
 
         <canvas id="canvas"></canvas>
@@ -45,10 +34,16 @@
         カメラを開始
     </button>
 
-    <p id="result">判定待ち</p>
-    <p id="score">姿勢スコア：--</p>
+    <p id="result">
+        判定待ち
+    </p>
 
-    <script src="main.js"></script>
+    <p id="score">
+        姿勢スコア：--
+    </p>
+
+    <!-- ここが重要 -->
+    <script type="module" src="main.js"></script>
 
 </body>
 
