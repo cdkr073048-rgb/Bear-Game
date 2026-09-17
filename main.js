@@ -1,8 +1,3 @@
-import {
-    PoseLandmarker,
-    FilesetResolver,
-    DrawingUtils
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
 
 
 const video =
