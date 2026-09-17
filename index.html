@@ -3,34 +3,39 @@
 
 <head>
     <meta charset="UTF-8">
+
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0">
 
-    <title>熊ゲーム 姿勢判定</title>
-
-    <!-- MediaPipe -->
-    <script
-        src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs"
-        crossorigin="anonymous">
-    </script>
+    <title>熊ゲーム</title>
 
     <style>
         body {
+            margin: 0;
             background: #222;
             color: white;
             text-align: center;
             font-family: sans-serif;
         }
 
-        video {
+        h1 {
+            margin: 20px;
+        }
+
+        #video {
             width: 90%;
-            max-width: 600px;
+            max-width: 640px;
             transform: scaleX(-1);
         }
 
         #status {
             font-size: 30px;
             font-weight: bold;
+        }
+
+        button {
+            font-size: 20px;
+            padding: 12px 25px;
         }
     </style>
 </head>
@@ -39,18 +44,21 @@
 
     <h1>🐻 熊ゲーム 姿勢判定</h1>
 
-    <video id="video"
-           autoplay
-           playsinline>
+    <video
+        id="video"
+        autoplay
+        playsinline>
     </video>
 
-    <p id="status">準備中...</p>
+    <p id="status">「カメラを開始」を押してください</p>
 
     <button id="startButton">
         カメラを開始
     </button>
 
-    <script src="main.js"></script>
+    <!-- 重要：moduleにする -->
+    <script type="module" src="./main.js"></script>
 
 </body>
+
 </html>
