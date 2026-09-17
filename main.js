@@ -1,3 +1,10 @@
+import {
+    PoseLandmarker,
+    FilesetResolver,
+    DrawingUtils
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
+
+
 const video =
     document.getElementById("video");
 
@@ -21,12 +28,13 @@ const scoreText =
 
 
 let poseLandmarker = null;
+
 let lastVideoTime = -1;
 
 
-// ================================
+// ========================================
 // MediaPipeを準備
-// ================================
+// ========================================
 
 async function setupPose() {
 
@@ -35,9 +43,8 @@ async function setupPose() {
 
 
     const vision =
-    　　await FilesetResolver.forVisionTasks(
-               "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-    　　　  );
+        await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
         );
 
 
@@ -63,11 +70,15 @@ async function setupPose() {
 }
 
 
-// ================================
-// カメラを開始
-// ================================
+// ========================================
+// カメラ
+// ========================================
 
 async function startCamera() {
+
+    message.textContent =
+        "カメラを起動しています...";
+
 
     const stream =
         await navigator.mediaDevices.getUserMedia({
@@ -96,9 +107,9 @@ async function startCamera() {
 }
 
 
-// ================================
+// ========================================
 // 姿勢検出
-// ================================
+// ========================================
 
 function detectPose() {
 
@@ -132,11 +143,11 @@ function detectPose() {
                 result.landmarks[0];
 
 
-            // 骨格を描画
             const drawingUtils =
                 new DrawingUtils(ctx);
 
 
+            // 骨格を描画
             drawingUtils.drawConnectors(
                 landmarks,
                 PoseLandmarker.POSE_CONNECTIONS
@@ -176,15 +187,20 @@ function detectPose() {
 }
 
 
-// ================================
+// ========================================
 // スタートボタン
-// ================================
+// ========================================
 
 startButton.addEventListener(
     "click",
     async () => {
 
+        console.log(
+            "スタートボタンが押されました"
+        );
+
         startButton.disabled = true;
+
 
         try {
 
@@ -192,20 +208,29 @@ startButton.addEventListener(
 
             await startCamera();
 
+
         } catch (error) {
 
-            console.error(error);
+            console.error(
+                "MediaPipeエラー:",
+                error
+            );
+
 
             message.textContent =
-                "姿勢AIの起動に失敗しました";
+                "エラーが発生しました";
+
 
             resultText.textContent =
                 error.name;
 
+
             scoreText.textContent =
                 error.message;
 
+
             startButton.disabled = false;
         }
+
     }
 );
