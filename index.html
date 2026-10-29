@@ -185,6 +185,16 @@ button:disabled {
             手本を削除
         </button>
 
+        <button id="importButton">
+            手本JSONを読み込む
+        </button>
+
+        <input
+            type="file"
+            id="importFile"
+            accept=".json,application/json"
+            hidden>
+
     </div>
 
     <script type="module">
@@ -460,7 +470,7 @@ function clearReference(name) {
 
 /** GitHubなどに置いた poses/bear.json を読み込む場合 */
 async function loadReferenceFromUrl(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`手本の読み込みに失敗しました: ${res.status}`);
   return res.json();
 }
@@ -498,6 +508,10 @@ const RECORD_MS = 2000;
 // true にすると、関節ごとの点数をスコアの横に表示する(調整用)
 const SHOW_DETAIL = true;
 
+// リポジトリに置いた手本JSON。この場所にファイルがあり、
+// このブラウザに保存済みの手本がなければ、自動で読み込む
+const DEFAULT_REFERENCE_URL = "./bear.json";
+
 const FEATURE_NAMES = {
     leftWrist: "左手首",
     rightWrist: "右手首",
@@ -522,6 +536,8 @@ const startButton = document.getElementById("startButton");
 const registerButton = document.getElementById("registerButton");
 const exportButton = document.getElementById("exportButton");
 const clearButton = document.getElementById("clearButton");
+const importButton = document.getElementById("importButton");
+const importFile = document.getElementById("importFile");
 
 
 // ========================================
@@ -955,8 +971,107 @@ clearButton.addEventListener("click", () => {
 });
 
 
+// ========================================
+// 手本JSONの読み込み
+// ========================================
+
+// 手本のJSONとして使えるか確認する
+function validateReference(ref) {
+
+    const features = ref && ref.features;
+
+    if (!features || typeof features !== "object") {
+        throw new Error("手本のJSONではありません");
+    }
+
+    const usable = Object.values(features).filter((f) =>
+        f &&
+        (f.type === "angle" || f.type === "pos") &&
+        f.value != null &&
+        typeof f.weight === "number"
+    );
+
+    if (usable.length < 3) {
+        throw new Error("手本のデータが足りません");
+    }
+}
+
+
+// 手本として使い始める(save が true ならこのブラウザにも保存する)
+function applyReference(ref, save) {
+
+    validateReference(ref);
+
+    // 保存名を揃える(JSONの name が違っても読み込めるように)
+    ref.name = REFERENCE_NAME;
+
+    reference = ref;
+
+    if (save) {
+        saveReference(reference);
+    }
+
+    smoother.reset();
+    updateReferenceInfo();
+}
+
+
+// ファイルを選んで読み込む
+importButton.addEventListener("click", () => {
+    importFile.click();
+});
+
+importFile.addEventListener("change", async () => {
+
+    const file = importFile.files[0];
+
+    if (!file) {
+        return;
+    }
+
+    try {
+
+        const ref = JSON.parse(await file.text());
+
+        applyReference(ref, true);
+
+        status.textContent = "手本を読み込みました！";
+
+    } catch (error) {
+
+        console.error(error);
+        status.textContent = "読み込みに失敗：" + error.message;
+    }
+
+    // 同じファイルをもう一度選べるようにする
+    importFile.value = "";
+});
+
+
+// このブラウザに手本がなければ、リポジトリのJSONを探して読み込む
+async function loadDefaultReference() {
+
+    if (reference) {
+        return;
+    }
+
+    try {
+
+        const ref = await loadReferenceFromUrl(DEFAULT_REFERENCE_URL);
+
+        // 保存はしない(リポジトリのJSONを差し替えたら、すぐ反映されるように)
+        applyReference(ref, false);
+
+    } catch (error) {
+
+        // ファイルがなければ何もしない
+    }
+}
+
+
 // ページを開いたときの表示
 updateReferenceInfo();
+loadDefaultReference();
 
     </script>
 
