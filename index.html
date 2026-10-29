@@ -39,9 +39,33 @@
         姿勢スコア：--
     </p>
 
-    <button id="startButton">
-        カメラを開始
-    </button>
+    <p id="referenceInfo">
+        手本：未登録
+    </p>
+
+    <p id="hint">
+        頭から腰のあたりまでが映る位置に立ってください。手本の登録も、プレイ時と同じ位置で行います。
+    </p>
+
+    <div class="controls">
+
+        <button id="startButton">
+            カメラを開始
+        </button>
+
+        <button id="registerButton" disabled>
+            手本を登録(3秒後に撮影)
+        </button>
+
+        <button id="exportButton" disabled>
+            手本をJSONで保存
+        </button>
+
+        <button id="clearButton" disabled>
+            手本を削除
+        </button>
+
+    </div>
 
     <script
         type="module"
