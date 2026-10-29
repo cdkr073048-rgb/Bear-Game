@@ -67,19 +67,52 @@ canvas {
     font-size: 20px;
 }
 
-button {
+#referenceInfo {
+    margin: 10px;
+
+    font-size: 18px;
+}
+
+#hint {
+    max-width: 640px;
+    margin: 10px auto;
+
+    font-size: 14px;
+    color: #aaa;
+}
+
+/* ボタンを並べる */
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+
     margin-top: 10px;
+}
+
+button {
+    margin-top: 0;
 
     padding: 15px 30px;
 
     font-size: 20px;
+    font-weight: bold;
 
     border: none;
     border-radius: 10px;
 
+    /* 押せるボタン:黄色 */
+    background: #ffd54f;
+    color: #111;
+
     cursor: pointer;
 }
 
+/* 押せないボタン:暗いグレーで、押せないことがはっきり分かる */
 button:disabled {
-    opacity: 0.5;
+    background: #444;
+    color: #888;
+
+    cursor: not-allowed;
 }
