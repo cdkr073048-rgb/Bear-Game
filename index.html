@@ -363,9 +363,9 @@ function buildReference(name, samples, weights = DEFAULT_WEIGHTS) {
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 const DEFAULT_OPTS = {
-  angleTol: 10, // この角度(°)以内の差なら満点
+  angleTol: 16, // この角度(°)以内の差なら満点
   angleMax: 50, // この角度以上の差なら0点
-  posTol: 0.12, // この距離(肩幅=1)以内の差なら満点
+  posTol: 0.20, // この距離(肩幅=1)以内の差なら満点
   posMax: 0.7, // この距離以上の差なら0点
   minCoverage: 0.6, // 重みの6割以上の特徴が見えていないとスコアを出さない
 };
@@ -418,7 +418,7 @@ function scorePose(current, ref, opts = {}) {
   const avg = sum / wsum;
   return {
     valid: true,
-    score: Math.round(100 * (0.7 * avg + 0.3 * worst)),
+    score: Math.round(100 * (0.8 * avg + 0.2 * worst)),
     coverage,
     detail,
   };
