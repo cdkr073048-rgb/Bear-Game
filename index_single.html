@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>熊ゲーム - 姿勢判定</title>
+
+    <style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+
+    background: #111;
+    color: white;
+
+    text-align: center;
+    font-family: sans-serif;
+}
+
+h1 {
+    margin: 10px 0 20px;
+}
+
+.camera-area {
+    position: relative;
+
+    width: 90vw;
+    max-width: 640px;
+
+    margin: 0 auto;
+
+    overflow: hidden;
+
+    border-radius: 15px;
+    background: #000;
+}
+
+video {
+    display: block;
+
+    width: 100%;
+    height: auto;
+
+    transform: scaleX(-1);
+}
+
+canvas {
+    position: absolute;
+
+    left: 0;
+    top: 0;
+
+    width: 100%;
+    height: 100%;
+
+    transform: scaleX(-1);
+
+    pointer-events: none;
+}
+
+#status {
+    margin: 20px 0 10px;
+
+    font-size: 30px;
+    font-weight: bold;
+}
+
+#score {
+    margin: 10px;
+
+    font-size: 20px;
+}
+
+#referenceInfo {
+    margin: 10px;
+
+    font-size: 18px;
+}
+
+#hint {
+    max-width: 640px;
+    margin: 10px auto;
+
+    font-size: 14px;
+    color: #aaa;
+}
+
+/* ボタンを並べる */
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+
+    margin-top: 10px;
+}
+
+button {
+    margin-top: 0;
+
+    padding: 15px 30px;
+
+    font-size: 20px;
+    font-weight: bold;
+
+    border: none;
+    border-radius: 10px;
+
+    /* 押せるボタン:黄色 */
+    background: #ffd54f;
+    color: #111;
+
+    cursor: pointer;
+}
+
+/* 押せないボタン:暗いグレーで、押せないことがはっきり分かる */
+button:disabled {
+    background: #444;
+    color: #888;
+
+    cursor: not-allowed;
+}
+
+    </style>
+</head>
+
+<body>
+
+    <h1>🐻 熊ゲーム 姿勢判定</h1>
+
+    <div class="camera-area">
+
+        <video
+            id="video"
+            autoplay
+            playsinline
+            muted>
+        </video>
+
+        <canvas id="canvas"></canvas>
+
+    </div>
+
+    <p id="status">
+        「カメラを開始」を押してください
+    </p>
+
+    <p id="score">
+        姿勢スコア：--
+    </p>
+
+    <p id="referenceInfo">
+        手本：未登録
+    </p>
+
+    <p id="hint">
+        頭から腰のあたりまでが映る位置に立ってください。手本の登録も、プレイ時と同じ位置で行います。
+    </p>
+
+    <div class="controls">
+
+        <button id="startButton">
+            カメラを開始
+        </button>
+
+        <button id="registerButton" disabled>
+            手本を登録(3秒後に撮影)
+        </button>
+
+        <button id="exportButton" disabled>
+            手本をJSONで保存
+        </button>
+
+        <button id="clearButton" disabled>
+            手本を削除
+        </button>
+
+    </div>
+
+    <script type="module">
+import {
+    PoseLandmarker,
+    FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
+
+// ======== poseScore(上半身の姿勢スコア計算) ========
+// poseScore.js
+// 上半身(肩・肘・手首)だけで姿勢を比較してスコア化するモジュール。
+// 下半身(腰より下)は一切使わないので、腰や足が映らなくても動作します。
+//
+// 使う入力: MediaPipe の worldLandmarks(メートル単位・腰中心原点、y は下向き)
+
+const MIN_VISIBILITY = 0.5;
+
+// 特徴ごとの重み。0 にするとその特徴は登録もスコア計算もされません。
+const DEFAULT_WEIGHTS = {
+  leftWrist: 1.0,
+  rightWrist: 1.0, // 肩に対する手首の位置(いちばん情報量が多い)
+  leftElbow: 0.8,
+  rightElbow: 0.8, // 肘の曲がり角度
+  leftElbowPos: 0.6,
+  rightElbowPos: 0.6, // 肩に対する肘の位置
+};
+
+const SIDES = {
+  left: { shoulder: 11, elbow: 13, wrist: 15 },
+  right: { shoulder: 12, elbow: 14, wrist: 16 },
+};
+
+// ---------- 特徴量の抽出 ----------
+
+function angle3D(a, b, c) {
+  const v1 = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+  const v2 = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const n = Math.hypot(v1.x, v1.y, v1.z) * Math.hypot(v2.x, v2.y, v2.z);
+  if (n === 0) return null;
+  return (Math.acos(Math.min(1, Math.max(-1, dot / n))) * 180) / Math.PI;
+}
+
+/**
+ * worldLandmarks(33点の配列)から特徴量を作る。
+ * 位置は「同じ側の肩を原点、肩幅を1」とした相対値なので、体格やカメラ距離に左右されにくい。
+ */
+function extractFeatures(world, imageLandmarks = null) {
+  if (!world || world.length < 17) return null;
+
+  const ls = world[11];
+  const rs = world[12];
+  const shoulderWidth = Math.hypot(ls.x - rs.x, ls.y - rs.y, ls.z - rs.z);
+  if (shoulderWidth < 0.05) return null; // 肩幅が極端に小さい = 検出が異常
+
+  // 見えているかどうかは、画像ランドマーク(result.landmarks[0])の visibility を優先して使う
+  const visOf = (i) => imageLandmarks?.[i]?.visibility ?? world[i].visibility ?? 1;
+  const vis = (...ids) => Math.min(...ids.map(visOf));
+  const rel = (p, s) => [(p.x - s.x) / shoulderWidth, (p.y - s.y) / shoulderWidth];
+
+  const f = {};
+  for (const [side, ids] of Object.entries(SIDES)) {
+    const shoulder = world[ids.shoulder];
+    const elbow = world[ids.elbow];
+    const wrist = world[ids.wrist];
+
+    f[`${side}Elbow`] = {
+      type: "angle",
+      value: angle3D(shoulder, elbow, wrist),
+      vis: vis(ids.shoulder, ids.elbow, ids.wrist),
+    };
+    f[`${side}Wrist`] = {
+      type: "pos",
+      value: rel(wrist, shoulder),
+      vis: vis(ids.shoulder, ids.wrist),
+    };
+    f[`${side}ElbowPos`] = {
+      type: "pos",
+      value: rel(elbow, shoulder),
+      vis: vis(ids.shoulder, ids.elbow),
+    };
+  }
+  return f;
+}
+
+// ---------- 手本の登録 ----------
+
+const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const std = (a, m) => Math.sqrt(mean(a.map((v) => (v - m) ** 2)));
+
+/** 登録中に溜めた特徴量の配列(samples)から手本データを作る。 */
+class PoseRecorder {
+  constructor() {
+    this.samples = [];
+    this.recording = false;
+  }
+  start() {
+    this.samples = [];
+    this.recording = true;
+  }
+  push(features) {
+    if (this.recording && features) this.samples.push(features);
+  }
+  stop() {
+    this.recording = false;
+    return this.samples;
+  }
+}
+
+function buildReference(name, samples, weights = DEFAULT_WEIGHTS) {
+  if (!samples || samples.length < 10) {
+    throw new Error("サンプルが足りません。体が映った状態でもう一度登録してください。");
+  }
+
+  const features = {};
+  const missing = []; // 十分に映っていなかった特徴
+  const unstable = []; // 登録中にブレが大きかった特徴
+
+  for (const [key, weight] of Object.entries(weights)) {
+    if (weight <= 0) continue;
+
+    const items = samples
+      .map((s) => s[key])
+      .filter((f) => f && f.vis >= MIN_VISIBILITY && f.value != null);
+
+    // 全フレームの6割以上で安定して見えていなければ除外
+    if (items.length < samples.length * 0.6) {
+      missing.push(key);
+      continue;
+    }
+
+    const type = items[0].type;
+    let value;
+    let sd;
+    if (type === "angle") {
+      const vals = items.map((i) => i.value);
+      value = mean(vals);
+      sd = std(vals, value);
+    } else {
+      const xs = items.map((i) => i.value[0]);
+      const ys = items.map((i) => i.value[1]);
+      const mx = mean(xs);
+      const my = mean(ys);
+      value = [mx, my];
+      sd = Math.hypot(std(xs, mx), std(ys, my));
+    }
+
+    const limit = type === "angle" ? 15 : 0.25;
+    if (sd > limit) unstable.push(key);
+
+    features[key] = { type, value, std: sd, weight };
+  }
+
+  return {
+    name,
+    version: 1,
+    createdAt: new Date().toISOString(),
+    features,
+    missing,
+    unstable,
+  };
+}
+
+// ---------- スコア計算 ----------
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+const DEFAULT_OPTS = {
+  angleTol: 10, // この角度(°)以内の差なら満点
+  angleMax: 50, // この角度以上の差なら0点
+  posTol: 0.12, // この距離(肩幅=1)以内の差なら満点
+  posMax: 0.7, // この距離以上の差なら0点
+  minCoverage: 0.6, // 重みの6割以上の特徴が見えていないとスコアを出さない
+};
+
+/**
+ * current: extractFeatures() の結果
+ * ref: buildReference() の結果(または読み込んだJSON)
+ * 戻り値: { valid, score(0-100), coverage, detail }
+ */
+function scorePose(current, ref, opts = {}) {
+  const o = { ...DEFAULT_OPTS, ...opts };
+  if (!current || !ref) return { valid: false, score: 0, coverage: 0, detail: {} };
+
+  let sum = 0;
+  let wsum = 0;
+  let totalW = 0;
+  let usedW = 0;
+  let worst = 1;
+  const detail = {};
+
+  for (const [key, r] of Object.entries(ref.features)) {
+    totalW += r.weight;
+    const c = current[key];
+    if (!c || c.value == null || c.vis < MIN_VISIBILITY) continue;
+
+    const isAngle = r.type === "angle";
+    const err = isAngle
+      ? Math.abs(c.value - r.value)
+      : Math.hypot(c.value[0] - r.value[0], c.value[1] - r.value[1]);
+    const base = isAngle ? o.angleTol : o.posTol;
+    const max = isAngle ? o.angleMax : o.posMax;
+
+    // 登録時にブレた特徴ほど許容を広げる
+    const tol = Math.min(Math.max(base, r.std * 2), max * 0.8);
+    const s = clamp01(1 - (err - tol) / (max - tol));
+
+    const w = r.weight * c.vis;
+    sum += s * w;
+    wsum += w;
+    usedW += r.weight;
+    if (r.weight >= 0.7) worst = Math.min(worst, s); // 重要な特徴の最低点
+    detail[key] = Math.round(s * 100);
+  }
+
+  const coverage = totalW > 0 ? usedW / totalW : 0;
+  if (coverage < o.minCoverage || wsum === 0) {
+    return { valid: false, score: 0, coverage, detail };
+  }
+
+  const avg = sum / wsum;
+  return {
+    valid: true,
+    score: Math.round(100 * (0.7 * avg + 0.3 * worst)),
+    coverage,
+    detail,
+  };
+}
+
+/** スコアのブレをならす(alphaが小さいほど滑らか) */
+class ScoreSmoother {
+  constructor(alpha = 0.2) {
+    this.alpha = alpha;
+    this.value = null;
+  }
+  update(v) {
+    this.value = this.value == null ? v : this.value * (1 - this.alpha) + v * this.alpha;
+    return this.value;
+  }
+  reset() {
+    this.value = null;
+  }
+}
+
+// ---------- 保存・読み込み ----------
+
+const STORAGE_PREFIX = "bearGame.pose.";
+
+function saveReference(ref) {
+  try {
+    localStorage.setItem(STORAGE_PREFIX + ref.name, JSON.stringify(ref));
+  } catch (e) {
+    console.warn("手本の保存に失敗しました", e);
+  }
+}
+
+function loadReference(name) {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + name);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearReference(name) {
+  try {
+    localStorage.removeItem(STORAGE_PREFIX + name);
+  } catch (e) {
+    /* 何もしない */
+  }
+}
+
+/** GitHubなどに置いた poses/bear.json を読み込む場合 */
+async function loadReferenceFromUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`手本の読み込みに失敗しました: ${res.status}`);
+  return res.json();
+}
+
+/** 手本をJSONファイルとしてダウンロード(リポジトリに置いて共有する用) */
+function downloadReference(ref) {
+  const blob = new Blob([JSON.stringify(ref, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${ref.name}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
+// ======== main(カメラ・検出・画面) ========
+// ========================================
+// MediaPipe Pose Landmarker
+// ========================================
+
+
+
+
+// ========================================
+// 設定
+// ========================================
+
+// 手本の名前(保存するJSONのファイル名にもなる)
+const REFERENCE_NAME = "bear";
+
+// 手本を撮影する長さ(ミリ秒)
+const RECORD_MS = 2000;
+
+// true にすると、関節ごとの点数をスコアの横に表示する(調整用)
+const SHOW_DETAIL = true;
+
+const FEATURE_NAMES = {
+    leftWrist: "左手首",
+    rightWrist: "右手首",
+    leftElbow: "左肘角度",
+    rightElbow: "右肘角度",
+    leftElbowPos: "左肘位置",
+    rightElbowPos: "右肘位置"
+};
+
+
+// ========================================
+// HTMLの部品
+// ========================================
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const status = document.getElementById("status");
+const scoreDisplay = document.getElementById("score");
+const referenceInfo = document.getElementById("referenceInfo");
+const startButton = document.getElementById("startButton");
+const registerButton = document.getElementById("registerButton");
+const exportButton = document.getElementById("exportButton");
+const clearButton = document.getElementById("clearButton");
+
+
+// ========================================
+// 状態
+// ========================================
+
+let poseLandmarker = null;
+
+// 最後に処理した動画時間
+let lastVideoTime = -1;
+
+// 手本(保存済みならページを開いたときに読み込む)
+let reference = loadReference(REFERENCE_NAME);
+
+// 手本の撮影用
+const recorder = new PoseRecorder();
+
+// 撮影中かどうか(撮影中は画面のメッセージを書き換えない)
+let registering = false;
+
+// スコアのブレをならす
+const smoother = new ScoreSmoother(0.2);
+
+
+// ========================================
+// MediaPipeを準備
+// ========================================
+
+async function setupPose() {
+
+    status.textContent = "AIを準備しています...";
+
+    // MediaPipeのWASM実行環境
+    const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
+    );
+
+    // Pose Landmarkerを作成
+    poseLandmarker = await PoseLandmarker.createFromOptions(
+        vision,
+        {
+            baseOptions: {
+                modelAssetPath:
+                    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+
+                // スマホでもまずはCPUで動かす
+                delegate: "CPU"
+            },
+
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.5,
+            minPosePresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        }
+    );
+
+    status.textContent = "AI準備完了！";
+}
+
+
+// ========================================
+// カメラ開始
+// ========================================
+
+async function startCamera() {
+
+    if (!window.isSecureContext) {
+        throw new Error("HTTPSまたはlocalhostで実行してください");
+    }
+
+    if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+    ) {
+        throw new Error("このブラウザではカメラを使用できません");
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+            facingMode: "user",
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+        },
+        audio: false
+    });
+
+    video.srcObject = stream;
+
+    // カメラの読み込みが完了するまで待つ
+    await new Promise((resolve) => {
+        video.onloadeddata = resolve;
+    });
+
+    await video.play();
+
+    // Canvasのサイズをカメラと同じにする
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    status.textContent = "人を探しています...";
+
+    // 姿勢検出開始
+    detectPose();
+}
+
+
+// ========================================
+// 姿勢検出
+// ========================================
+
+function detectPose() {
+
+    if (!poseLandmarker || video.readyState < 2) {
+        requestAnimationFrame(detectPose);
+        return;
+    }
+
+    // 新しいフレームだけ処理
+    if (video.currentTime !== lastVideoTime) {
+
+        lastVideoTime = video.currentTime;
+
+        try {
+
+            const result = poseLandmarker.detectForVideo(
+                video,
+                performance.now()
+            );
+
+            if (result.landmarks && result.landmarks.length > 0) {
+                handleResult(result);
+            } else {
+                handleNoPerson();
+            }
+
+        } catch (error) {
+            console.error("姿勢検出エラー：", error);
+        }
+    }
+
+    requestAnimationFrame(detectPose);
+}
+
+
+// 人体が見つかったとき
+function handleResult(result) {
+
+    const landmarks = result.landmarks[0];
+    const world = result.worldLandmarks && result.worldLandmarks[0];
+
+    drawPose(landmarks);
+
+    // 上半身の特徴量(肩・肘・手首)を作る。下半身は使わない
+    const features = extractFeatures(world, landmarks);
+
+    // 撮影中だけサンプルが溜まる
+    recorder.push(features);
+
+    // 撮影中は画面のメッセージを書き換えない
+    if (registering) {
+        return;
+    }
+
+    updateScore(features);
+}
+
+
+// 人体が見つからないとき
+function handleNoPerson() {
+
+    clearCanvas();
+
+    if (registering) {
+        return;
+    }
+
+    status.textContent = "人が見つかりません";
+    scoreDisplay.textContent = "姿勢スコア：--";
+    smoother.reset();
+}
+
+
+// ========================================
+// スコア表示
+// ========================================
+
+function updateScore(features) {
+
+    if (!reference) {
+        status.textContent = "手本を登録してください";
+        scoreDisplay.textContent = "姿勢スコア：--";
+        return;
+    }
+
+    const r = scorePose(features, reference);
+
+    // 上半身が十分に映っていない
+    if (!r.valid) {
+        status.textContent = "肩から手までをカメラに映してください";
+        scoreDisplay.textContent = "姿勢スコア：--";
+        smoother.reset();
+        return;
+    }
+
+    const score = Math.round(smoother.update(r.score));
+
+    let text = "姿勢スコア：" + score;
+
+    if (SHOW_DETAIL) {
+        const detail = Object.entries(r.detail)
+            .map(([key, s]) => (FEATURE_NAMES[key] || key) + " " + s)
+            .join(" / ");
+
+        text += "　[" + detail + "]";
+    }
+
+    scoreDisplay.textContent = text;
+
+    if (score >= 80) {
+        status.textContent = "🟢 GOOD！";
+    } else if (score >= 50) {
+        status.textContent = "🟡 もう少し！";
+    } else {
+        status.textContent = "🔴 姿勢を確認！";
+    }
+
+    // Unity連携用:スコアが出るたびにイベントを送る
+    // 後で window.addEventListener("pose-score", ...) で受け取って
+    // unityInstance.SendMessage(...) につなぐ
+    window.dispatchEvent(
+        new CustomEvent("pose-score", { detail: { score: score } })
+    );
+}
+
+
+// ========================================
+// 手本の登録
+// ========================================
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function registerReference() {
+
+    if (!poseLandmarker || registering) {
+        return;
+    }
+
+    registering = true;
+    registerButton.disabled = true;
+
+    try {
+
+        // カウントダウン(この間にポーズをとる)
+        for (let i = 3; i > 0; i--) {
+            status.textContent = "手本の姿勢をとってください… " + i;
+            await sleep(1000);
+        }
+
+        // 撮影
+        status.textContent = "撮影中…そのまま動かないでください";
+        recorder.start();
+        await sleep(RECORD_MS);
+        const samples = recorder.stop();
+
+        const ref = buildReference(REFERENCE_NAME, samples);
+
+        // 使える特徴が少なすぎる = 上半身がうまく映っていない
+        if (Object.keys(ref.features).length < 3) {
+            throw new Error("肩から手までが映っていませんでした");
+        }
+
+        reference = ref;
+        saveReference(reference);
+        smoother.reset();
+
+        // 映りが悪かった・ブレた部分があれば知らせる
+        const names = (keys) =>
+            keys.map((k) => FEATURE_NAMES[k] || k).join("、");
+
+        let message = "手本を登録しました！";
+
+        if (ref.missing.length > 0) {
+            message += "(映っていない部分:" + names(ref.missing) + ")";
+        }
+
+        if (ref.unstable.length > 0) {
+            message += "(ブレた部分:" + names(ref.unstable) + ")";
+        }
+
+        status.textContent = message;
+
+    } catch (error) {
+
+        console.error(error);
+        status.textContent = "登録に失敗：" + error.message;
+
+    } finally {
+
+        recorder.stop();
+        registering = false;
+        registerButton.disabled = false;
+        updateReferenceInfo();
+    }
+}
+
+
+// 手本の表示とボタンの状態
+function updateReferenceInfo() {
+
+    if (reference) {
+        const date = new Date(reference.createdAt)
+            .toLocaleString("ja-JP");
+
+        referenceInfo.textContent = "手本：登録済み（" + date + "）";
+    } else {
+        referenceInfo.textContent = "手本：未登録";
+    }
+
+    exportButton.disabled = !reference;
+    clearButton.disabled = !reference;
+}
+
+
+// ========================================
+// 骨格をCanvasに描画(上半身のみ)
+// ========================================
+
+function drawPose(landmarks) {
+
+    clearCanvas();
+
+    // 骨格をつなぐ線
+    const connections = [
+        [11, 12], // 肩
+        [11, 13], // 左上腕
+        [13, 15], // 左前腕
+        [12, 14], // 右上腕
+        [14, 16]  // 右前腕
+    ];
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "lime";
+
+    connections.forEach(([a, b]) => {
+
+        const pointA = landmarks[a];
+        const pointB = landmarks[b];
+
+        if (pointA.visibility < 0.5 || pointB.visibility < 0.5) {
+            return;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(pointA.x * canvas.width, pointA.y * canvas.height);
+        ctx.lineTo(pointB.x * canvas.width, pointB.y * canvas.height);
+        ctx.stroke();
+    });
+
+    // 関節を描く(肩・肘・手首)
+    [11, 12, 13, 14, 15, 16].forEach((i) => {
+
+        const point = landmarks[i];
+
+        if (point.visibility < 0.5) {
+            return;
+        }
+
+        ctx.beginPath();
+        ctx.arc(
+            point.x * canvas.width,
+            point.y * canvas.height,
+            6,
+            0,
+            Math.PI * 2
+        );
+        ctx.fillStyle = "red";
+        ctx.fill();
+    });
+}
+
+
+// ========================================
+// Canvasを消す
+// ========================================
+
+function clearCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+
+// ========================================
+// ボタン
+// ========================================
+
+startButton.addEventListener("click", async () => {
+
+    startButton.disabled = true;
+
+    try {
+
+        await setupPose();
+        await startCamera();
+
+        // カメラが動き出したら登録できる
+        registerButton.disabled = false;
+
+    } catch (error) {
+
+        console.error(error);
+        status.textContent = "起動に失敗しました";
+        console.error("詳細：", error.message);
+        startButton.disabled = false;
+    }
+});
+
+registerButton.addEventListener("click", registerReference);
+
+exportButton.addEventListener("click", () => {
+    if (reference) {
+        downloadReference(reference);
+    }
+});
+
+clearButton.addEventListener("click", () => {
+    clearReference(REFERENCE_NAME);
+    reference = null;
+    smoother.reset();
+    scoreDisplay.textContent = "姿勢スコア：--";
+    updateReferenceInfo();
+});
+
+
+// ページを開いたときの表示
+updateReferenceInfo();
+
+    </script>
+
+</body>
+
+</html>
